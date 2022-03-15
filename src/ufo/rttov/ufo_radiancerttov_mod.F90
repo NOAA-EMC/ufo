@@ -29,8 +29,9 @@ module ufo_radiancerttov_mod
   !> Fortran derived type for the observation type
   type, public :: ufo_radiancerttov
     private
-    character(len=MAXVARLEN), public, allocatable :: varin(:)  ! variables requested from the model
-    integer, allocatable                          :: channels(:)
+    character(len=MAXVARLEN), public, allocatable :: varin(:)      ! variables requested from the model.
+    integer, allocatable                          :: channels(:)   ! list of instrument channels to simulate.
+    integer, allocatable                          :: coefindex(:)  ! list of the coefindex for the channels to simulate.
     type(rttov_conf)                              :: conf
     type(ufo_rttov_io)                            :: RTProf
   contains
@@ -50,7 +51,7 @@ contains
     integer(c_int),            intent(in)   :: channels(:)  !List of channels to use
 
     type(fckit_configuration)               :: f_confOpts ! RTcontrol
-    integer                                 :: ind, j
+    integer                                 :: ind, j, jspec, ii, jj, jnew
     logical                                 :: setup_linear_model = .false.
 
     call f_confOper % get_or_die("obs options",f_confOpts)
@@ -81,6 +82,36 @@ contains
       ind = ind + 1
     end do
 
+    ! channels contains a list of instrument channels. From this we need to work out the coefindex
+    ! which RTTOV needs to index the entry in the coefficient file.  This allows cut down
+    ! coefficient files to be used.
+    if (self % conf % nSensors /= 1) then
+      write(message,*) 'ufo_radiancerttov_setup error: more than 1 sensor => coef indexing will not work'
+      call abor1_ftn(message)
+    end if
+
+    allocate(self % channels(size(channels)))
+    allocate(self % coefindex(size(channels)))
+    self % coefindex(:) = 0
+    self % channels(:) = channels
+
+    jnew = 1
+    coefloop: do ii = 1, size(channels)
+      jj = jnew
+      do while ( jj <= self % conf % rttov_coef_array(1) % coef % fmv_chn )
+        if (channels(ii) == self % conf % rttov_coef_array(1) % coef % ff_ori_chn(jj)) then
+          self % coefindex(ii) = jj
+          cycle coefloop
+        end if
+        jj = jj + 1
+      end do
+    end do coefloop
+
+    if ( any(self % coefindex == 0) ) then
+      write(message,*) 'ufo_radiancerttov_setup error: input channels not in the coefficient file'
+      call abor1_ftn(message)
+    end if
+
     !Add RTTOV-SCATT inputs ensuring not to double count duplicates
     if (self % conf % do_mw_scatt) then
       do j = 1, size(varin_scatt)
@@ -98,10 +129,6 @@ contains
       enddo
     end if
 
-    ! save channels
-    allocate(self%channels(size(channels)))
-    self%channels(:) = channels(:)
-
     write(message,'(A)') 'Finished setting up rttov'
     call fckit_log%info(message)
 
@@ -113,6 +140,9 @@ contains
     class(ufo_radiancerttov), intent(inout) :: self
 
     call rttov_conf_delete(self%conf)
+    if (allocated(self % varin)) deallocate(self % varin)
+    if (allocated(self % channels)) deallocate(self % channels)
+    if (allocated(self % coefindex)) deallocate(self % coefindex)
 
   end subroutine ufo_radiancerttov_delete
 
@@ -144,7 +174,7 @@ contains
     integer                                 :: nprofiles, nlevels
     integer(kind=jpim)                      :: errorstatus  ! Error status of RTTOV subroutine calls
 
-    integer                                 :: i_inst, iprof_rttov, iprof, ichan, ichan_sim
+    integer                                 :: i_inst, iprof_rttov, iprof, ichan, ichan_sim, jchan
     integer                                 :: nprof_sim, nprof_max_sim, nchan_total
     integer                                 :: prof_start, prof_end
 
@@ -257,6 +287,12 @@ contains
       ichan_sim = 0_jpim
       nchan_sim = 0_jpim
 
+      !allocate list used to store 'good' profiles
+      !prof_list is defined in utils_mod
+      !initialise to -1, so no bad profile is given an emissivity
+      allocate(prof_list(nprof_sim,2))
+      prof_list = -1 
+
       ! Build the list of profile/channel indices in chanprof
       do iprof_rttov = 1, nprof_sim
         errorstatus = errorstatus_success
@@ -271,21 +307,23 @@ contains
         if(self % conf % RTTOV_profile_checkinput) call self % RTprof % check(self % conf, iprof, i_inst, errorstatus)
 
         ! check sfc_emiss valid if read in
-        if (allocated(sfc_emiss)) then
-          do ichan = 1, nchan_inst
-            if ((sfc_emiss(ichan,iprof) > 1.0) .or. (sfc_emiss(ichan,iprof) < 0.0)) then
-              errorstatus = errorstatus_fatal
-            end if
-          end do
-        end if
+        if(errorstatus == errorstatus_success) then
+          if (allocated(sfc_emiss)) then
+            do ichan = 1, nchan_inst
+              if ((sfc_emiss(ichan,iprof) > 1.0) .or. (sfc_emiss(ichan,iprof) < 0.0)) then
+                errorstatus = errorstatus_fatal
+              end if
+            end do
+          end if
 
-        if (errorstatus == errorstatus_success) then 
+          prof_list(iprof_rttov,1) = iprof_rttov ! chunk index
+          prof_list(iprof_rttov,2) = iprof       ! all-obs index
           do ichan = 1, nchan_inst
             ichan_sim = ichan_sim + 1_jpim
             chanprof(ichan_sim) % prof = iprof_rttov ! this refers to the slice of the RTprofile array passed to RTTOV
-            chanprof(ichan_sim) % chan = self % channels(ichan)
+            chanprof(ichan_sim) % chan = self % coefindex(ichan)
             self % RTprof % chanprof(nchan_total + ichan_sim) % prof = iprof ! this refers to the index of the profile from the geoval
-            self % RTprof % chanprof(nchan_total + ichan_sim) % chan = self % channels(ichan)
+            self % RTprof % chanprof(nchan_total + ichan_sim) % chan = self % coefindex(ichan)
           end do
           nchan_sim = ichan_sim
         end if
@@ -300,26 +338,34 @@ contains
         if (allocated(sfc_emiss)) then
           self % RTprof % calcemis(:) = .false.
           do ichan = 1, ichan_sim
-            self % RTprof % emissivity(ichan) % emis_in = sfc_emiss(chanprof(ichan) % chan, iprof)
-            if (self % RTprof % emissivity(ichan) % emis_in == 0.0) then
-              self % RTprof % calcemis(ichan) = .true.
-            end if
+            do jchan = 1, nchan_inst
+              if (chanprof(ichan) % chan == self % channels(jchan)) then
+                self % RTprof % emissivity(ichan) % emis_in = sfc_emiss(jchan, iprof)
+                if (self % RTprof % emissivity(ichan) % emis_in == 0.0) then
+                  self % RTprof % calcemis(ichan) = .true.
+                end if
+                cycle
+              end if
+            end do
           end do
         else
-          call self % RTProf % init_emissivity(self % conf, prof_start)
+          call self % RTProf % init_default_emissivity(self % conf, prof_start)
         end if
       end if
 
       ! Write out emissivity if checking profile
       if(size(self % conf % inspect) > 0) then
         do ichan = 1, ichan_sim, nchan_inst
-          iprof = chanprof(ichan) % prof
+          iprof = prof_start + chanprof(ichan) % prof - 1
           if(any(self % conf % inspect == iprof)) then
+            write(*,*) "profile ", iprof
             write(*,*) "calcemiss = ",self % RTprof % calcemis(ichan:ichan+nchan_inst-1)
             write(*,*) "emissivity in = ",self % RTprof % emissivity(ichan:ichan+nchan_inst-1) % emis_in
           end if
         end do
       end if
+
+      deallocate(prof_list)
 
       ! --------------------------------------------------------------------------
       ! Call RTTOV model
@@ -360,7 +406,6 @@ contains
               calcemis    = self % RTProf % calcemis(1:nchan_sim),            &! in    flag for internal emissivity calcs
               emissivity  = self % RTProf % emissivity(1:nchan_sim),          &! inout input/output emissivities per channel
               emissivity_k = self % RTProf % emissivity_k(1:nchan_sim))        ! inout input/output emissivities per channel
-            
           end if
           
           if ( errorstatus /= errorstatus_success ) then
@@ -402,7 +447,7 @@ contains
                                          ' skipping profiles ', prof_start, ' -- ', prof_start + nprof_sim - 1
             call fckit_log%info(message)
           end if
-        
+
         end if
       
         ! Put simulated brightness temperature into hofx
@@ -415,8 +460,9 @@ contains
           ! Write out emissivity out and hofx
           if(size(self % conf % inspect) > 0) then
             do ichan = 1, ichan_sim, nchan_inst
-              iprof = chanprof(ichan) % prof
+              iprof = prof_start + chanprof(ichan) % prof - 1
               if(any(self % conf % inspect == iprof)) then
+                write(*,*) "profile ", iprof
                 write(*,*) "emissivity out = ",self % RTprof % emissivity(ichan:ichan+nchan_inst-1) % emis_out
                 write(*,*) "hofx out = ",hofx(1:size(self%channels),iprof)
               end if
@@ -462,7 +508,7 @@ contains
     else
       write(message,'(A)') &
         'Done. Returning'
-      call fckit_log%info(message)     
+      call fckit_log%debug(message)
     end if
 
   !end do Sensor_Loop

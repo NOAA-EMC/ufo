@@ -7,9 +7,10 @@
 
 module ufo_rttovonedvarcheck_utils_mod
 
-use kinds
-use ufo_constants_mod, only: min_q
 use fckit_log_module, only : fckit_log
+use kinds
+use missing_values_mod
+use ufo_constants_mod, only: min_q, zero, Pa_to_hPa
 use ufo_geovals_mod
 use ufo_rttovonedvarcheck_constants_mod
 use ufo_rttovonedvarcheck_obs_mod
@@ -24,6 +25,9 @@ private
 ! subroutines - public
 public ufo_rttovonedvarcheck_check_geovals
 public ufo_rttovonedvarcheck_adjust_bmatrix
+public ufo_rttovonedvarcheck_check_ctp
+public ufo_rttovonedvarcheck_all_to_subset_by_channels
+public ufo_rttovonedvarcheck_subset_to_all_by_channels
 
 character(len=max_string) :: message
 
@@ -174,20 +178,20 @@ if (profindex % qt(1) > 0) then
   allocate(ql(nlevels))
   allocate(qi(nlevels))
 
-  humidity_total(:) = 0.0
+  humidity_total(:) = zero
   ! Water vapour
   call ufo_geovals_get_var(geovals, trim(var_q), geoval)
   humidity_total(:) = humidity_total(:) + geoval%vals(:, 1)
 
   ! Cloud liquid water
   call ufo_geovals_get_var(geovals, trim(var_clw), geoval)
-  where (geoval%vals(:, 1) < 0.0) geoval%vals(:, 1) = 0.0
+  where (geoval%vals(:, 1) < zero) geoval%vals(:, 1) = zero
   humidity_total(:) = humidity_total(:) + geoval%vals(:, 1)
 
   ! Add ciw if rttov scatt is being used
   if (self % RTTOV_mwscattSwitch) then
     call ufo_geovals_get_var(geovals, trim(var_cli), geoval)
-    where (geoval%vals(:, 1) < 0.0) geoval%vals(:, 1) = 0.0
+    where (geoval%vals(:, 1) < zero) geoval%vals(:, 1) = zero
     humidity_total(:) = humidity_total(:) + geoval%vals(:, 1)
   end if
 
@@ -334,22 +338,25 @@ real(kind_real), intent(inout)              :: b_sigma(:)
 integer :: i, j, chanindex
 real(kind_real) :: MwEmissError
 real(kind_real) :: bscale
+real(kind_real) :: missing
+
+missing = missing_value(missing)
+
+!! Make sure emisspc is not done over sea
+if (obs % surface_type(obindex) == RTsea) profindex % emisspc(:) = 0
 
 !! Switch off emissivity retrieval if not needed or over sea
 !! or if missing values exist in microwave emissivity error atlas
 if (obs % surface_type(obindex) /= RTland .or. &
-    .not. allocated(obs % mwemisserr) ) profindex % mwemiss(:) = 0
-
-!IF (SatInfo % Systemtype /= Stype_ATOVS .OR. &
-!   .NOT. UseEmissivityAtlas .OR. Ob % surface /= RTland) THEN
-!  Profindex % mwemiss(:) = 0
-!ELSE
-!  IF (ASSOCIATED (Ob % MwEmErrAtlas)) THEN
-!    IF (ABS (Ob % MwEmErrAtlas(1) - RMDI) < RMDItol) THEN
-!      Profindex % mwemiss(:) = 0
-!    END IF
-!  END IF
-!END IF
+    .not. allocated(obs % mwemisserr) ) then
+    profindex % mwemiss(:) = 0
+else
+  if (allocated(obs % mwemisserr)) then
+    if (obs % mwemisserr(1, obindex) == missing) then
+      profindex % mwemiss = 0
+    end if
+  end if
+end if
 
 ! This has been left in for future development
 !! Use errors associated with microwave emissivity atlas
@@ -362,12 +369,12 @@ if (profindex % mwemiss(1) > 0) then
   ! by a factor MwEmissError/SQRT(diag(B_matrix)) for each channel.
   do i = profindex % mwemiss(1), profindex % mwemiss(2)
     chanindex = 0
-    do j = 1, size(obs % channels)
+    chanloop: do j = 1, size(obs % channels)
       if (obs % channels(j) == config % EmissToChannelMap(i - profindex % mwemiss(1) + 1)) then
         chanindex = j
-        cycle
+        exit chanloop
       end if
-    end do
+    end do chanloop
     if (chanindex == 0) then
       write(message,*) "MwEmissError for channel ",config % EmissToChannelMap(i - profindex % mwemiss(1) + 1), &
                        "is required. This channel should be included in the list of filter vars for the ", &
@@ -390,8 +397,7 @@ end if
 
 !! Scale the background skin temperature error covariances over land
 if (profindex % tstar > 0) then
-  if (obs % surface_type(obindex) == RTland .and. config % SkinTempErrorLand >= 0.0) then
-    write(*,*) "Adjusting b matrix t star = ", profindex % tstar
+  if (obs % surface_type(obindex) == RTland .and. config % SkinTempErrorLand >= zero) then
     bscale = config % SkinTempErrorLand / sqrt (b_matrix(profindex % tstar,profindex % tstar))
     b_matrix(:,profindex % tstar) = b_matrix(:,profindex % tstar) * bscale
     b_matrix(profindex % tstar,:) = b_matrix(profindex % tstar,:) * bscale
@@ -404,5 +410,104 @@ end if
 end subroutine ufo_rttovonedvarcheck_adjust_bmatrix
 
 ! ----------------------------------------------------------
+
+subroutine ufo_rttovonedvarcheck_check_ctp(ctp, geovals, nlevels)
+
+implicit none
+real(kind_real), intent(inout) :: ctp       !< ctp in hPa
+type(ufo_geovals), intent(in)  :: geovals   !< model data at obs location
+integer, intent(in)            :: nlevels   !< number of levels in 1dvar
+
+type(ufo_geoval), pointer      :: geoval
+real(kind_real), allocatable   :: pressure(:) ! pressure (hPa)
+integer                        :: ilev        ! counter
+
+allocate(pressure(nlevels))
+call ufo_geovals_get_var(geovals, trim(var_prs), geoval)
+pressure(:) = geoval%vals(:, 1) * Pa_to_hPa    ! hPa
+
+do ilev = 1, nlevels
+  if (abs(pressure(ilev) - ctp) < 1.0e-3) ctp = pressure(ilev)
+end do
+
+end subroutine ufo_rttovonedvarcheck_check_ctp
+
+! -------------------------------------------------------------
+
+subroutine ufo_rttovonedvarcheck_all_to_subset_by_channels(channels_all, &
+                          allvector, channels_subset, subsetvector)
+
+implicit none
+integer, intent(in)          :: channels_all(:)
+real(kind_real), intent(in)  :: allvector(:)
+integer, intent(in)          :: channels_subset(:)
+real(kind_real), intent(out) :: subsetvector(:)
+
+integer                      :: i, j, jnew
+real(kind_real)              :: missing         ! missing value
+
+missing = missing_value(missing)
+subsetvector(:) = missing
+
+if ((size(channels_all)  /= size(allvector)) .or. &
+    (size(channels_subset) /= size(subsetvector))) then
+  write(*,*) "channels_all and allvector sizes = ",size(channels_all),size(allvector)
+  write(*,*) "channels_subset and subsetvector sizes = ",size(channels_subset),size(subsetvector)
+  call abor1_ftn("ufo_rttovonedvarcheck_all_to_subset_by_channels: arrays and channels size don't match")
+end if
+
+jnew = 1
+used_loop: do i = 1, size(channels_subset)
+  j = jnew
+  do while ( j <= size(channels_all) )
+    if (channels_subset(i) == channels_all(j)) then
+      subsetvector(i) = allvector(j)
+      cycle used_loop
+    end if
+    j = j + 1
+  end do
+end do used_loop
+
+end subroutine ufo_rttovonedvarcheck_all_to_subset_by_channels
+
+! -------------------------------------------------------------
+
+subroutine ufo_rttovonedvarcheck_subset_to_all_by_channels(channels_subset, &
+                          subsetvector, channels_all, allvector)
+
+implicit none
+integer, intent(in)          :: channels_subset(:)
+real(kind_real), intent(in)  :: subsetvector(:)
+integer, intent(in)          :: channels_all(:)
+real(kind_real), intent(out) :: allvector(:)
+
+integer                      :: i, j, jnew
+real(kind_real)              :: missing         ! missing value
+
+missing = missing_value(missing)
+allvector(:) = missing
+
+if ((size(channels_subset) /= size(subsetvector)) .or. &
+    (size(channels_all)  /= size(allvector))) then
+  write(*,*) "channels_subset and subsetvector sizes = ",size(channels_subset),size(subsetvector)
+  write(*,*) "channels_all and allvector sizes = ",size(channels_all),size(allvector)
+  call abor1_ftn("ufo_rttovonedvarcheck_subset_to_all_by_channels: arrays and channels size don't match")
+end if
+
+jnew = 1
+used_loop: do i = 1, size(channels_subset)
+  j = jnew
+  do while ( j <= size(channels_all) )
+    if (channels_subset(i) == channels_all(j)) then
+      allvector(j) = subsetvector(i)
+      cycle used_loop
+    end if
+    j = j + 1
+  end do
+end do used_loop
+
+end subroutine ufo_rttovonedvarcheck_subset_to_all_by_channels
+
+! -------------------------------------------------------------
 
 end module ufo_rttovonedvarcheck_utils_mod

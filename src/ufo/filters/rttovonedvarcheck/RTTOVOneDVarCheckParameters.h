@@ -147,6 +147,9 @@ class RTTOVOneDVarCheckParameters : public FilterParametersBase {
   /// Output the LWP if the profile converges
   oops::Parameter<bool> Store1DVarLWP{"Store1DVarLWP", false, this};
 
+  /// Output the IWP if the profile converges
+  oops::Parameter<bool> Store1DVarIWP{"Store1DVarIWP", false, this};
+
   /// Output the CLW if the profile converges
   oops::Parameter<bool> Store1DVarCLW{"Store1DVarCLW", false, this};
 
@@ -166,11 +169,16 @@ class RTTOVOneDVarCheckParameters : public FilterParametersBase {
   /// Maximum number of iterations for internal Marquardt-Levenberg loop
   oops::Parameter<int> MaxMLIterations{"MaxMLIterations", 7, this};
 
-  /// Starting observation to run through 1d-var, subsetting for testing
-  oops::Parameter<int> StartOb{"StartOb", 0, this};
+  /// If the iteration number is greater than ConvergeCheckChansAfterIteration then the
+  /// slow converging channels, specified by ConvergeCheckChans, have the observation error
+  /// inflated to 100000.0
+  oops::Parameter<int> ConvergeCheckChansAfterIteration{
+      "ConvergeCheckChansAfterIteration", 3, this};
 
-  /// Final observation to run through 1d-var, subsetting for testing
-  oops::Parameter<int> FinishOb{"FinishOb", 0, this};
+  /// List of channels to inflate the observation error (R) for if the retrieval goes beyond
+  /// ConvergeCheckChansAfterIteration iterations.  The inflated variance for these channels is
+  /// set to 100000.0 for future iterations effectively removing it from the minimization.
+  oops::OptionalParameter<std::vector<int>> ConvergeCheckChans{"ConvergeCheckChans", this};
 
   /// Check all the retrieved brightness temperatures are within a factor * error of the
   /// observed and bias corrected BTs.  If this value is less than 0.0 this check is
@@ -184,9 +192,29 @@ class RTTOVOneDVarCheckParameters : public FilterParametersBase {
   /// Cost threshold for convergence check when cost function value is used for convergence
   oops::Parameter<double> CostConvergenceFactor{"CostConvergenceFactor", 0.01, this};
 
+  /// The fraction of the Jacobian that is permitted to be below the cloud_top_pressure for the
+  /// IR cloudy channel selection.  The Jacobian is integrated from the toa -> surface and a
+  /// maximum of 1 % of the integrated Jacobian is allowed to be below the cloud top.
+  oops::Parameter<double> IRCloud_Threshold{"IRCloud_Threshold", 0.01, this};
+
   /// Value to scale the skin temperature error over land.  If less than zero
   /// no scaling is done hence the default value of -1.0.
   oops::Parameter<double> SkinTempErrorLand{"SkinTempErrorLand", -1.0, this};
+
+  /// Max LWP in check the cloudy iteration in kg/m2
+  oops::Parameter<double> maxLWPForCloudyCheck{"MaxLWPForCloudyCheck", 2.0, this};
+
+  /// Max IWP in check the cloudy iteration in kg/m2
+  oops::Parameter<double> maxIWPForCloudyCheck{"MaxIWPForCloudyCheck", 2.0, this};
+
+  /// -------------------------------
+  /// Variables purely for testing
+  /// -------------------------------
+  /// Starting observation to run through 1d-var, subsetting for testing
+  oops::Parameter<int> StartOb{"StartOb", 0, this};
+
+  /// Final observation to run through 1d-var, subsetting for testing
+  oops::Parameter<int> FinishOb{"FinishOb", 0, this};
 
   /// Get ObsBias from database if testing code.
   oops::OptionalParameter<std::string> obsBiasGroupForTesting{"obs bias group for testing", this};
