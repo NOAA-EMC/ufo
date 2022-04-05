@@ -23,6 +23,7 @@ list( APPEND ufo_test_input
   testinput/amsua_crtm.yaml
   testinput/amsua_crtm_bc.yaml
   testinput/amsua_crtm_bc_geos.yaml
+  testinput/amsua_crtm_bc_channelnobc_geos.yaml
   testinput/amsua_n19_fov.yaml
   testinput/amsua_qc.yaml
   testinput/amsua_qc_clwretmw.yaml
@@ -200,6 +201,7 @@ list( APPEND ufo_test_input
   testinput/qc_gauss_thinning.yaml
   testinput/qc_gauss_thinning_median.yaml
   testinput/qc_gauss_thinning_ops.yaml
+  testinput/qc_gauss_thinning_records_are_single_obs.yaml
   testinput/qc_gauss_thinning_satrad.yaml
   testinput/qc_gauss_thinning_unittests.yaml
   testinput/qc_grosserrorwholereport.yaml
@@ -229,6 +231,7 @@ list( APPEND ufo_test_input
   testinput/qc_thinning.yaml
   testinput/qc_temporal_thinning.yaml
   testinput/qc_temporal_thinning_unittests.yaml
+  testinput/qc_temporal_thinning_records_are_single_obs.yaml
   testinput/qc_trackcheck.yaml
   testinput/qc_trackcheck_unittests.yaml
   testinput/qc_trackcheckship.yaml
@@ -677,6 +680,13 @@ if( crtm_FOUND )
     ecbuild_add_test( TARGET  test_ufo_opr_crtm_bc_amsua_geos
                       COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsOperator.x
                       ARGS    "testinput/amsua_crtm_bc_geos.yaml"
+                      ENVIRONMENT OOPS_TRAPFPE=1
+                      DEPENDS test_ObsOperator.x
+                      TEST_DEPENDS ufo_get_ufo_test_data ufo_get_crtm_test_data )
+
+    ecbuild_add_test( TARGET  test_ufo_opr_crtm_bc_channelnobc_amsua_geos
+                      COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsOperator.x
+                      ARGS    "testinput/amsua_crtm_bc_channelnobc_geos.yaml"
                       ENVIRONMENT OOPS_TRAPFPE=1
                       DEPENDS test_ObsOperator.x
                       TEST_DEPENDS ufo_get_ufo_test_data ufo_get_crtm_test_data )
@@ -1981,6 +1991,14 @@ ecbuild_add_test( TARGET  test_ufo_qc_gauss_thinning_ops
                   DEPENDS test_ObsFilters.x
                   TEST_DEPENDS ufo_get_ufo_test_data )
 
+ecbuild_add_test( TARGET  test_ufo_qc_gauss_thinning_records_are_single_obs
+                  MPI     4
+                  COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsFilters.x
+                  ARGS    "testinput/qc_gauss_thinning_records_are_single_obs.yaml"
+                  ENVIRONMENT OOPS_TRAPFPE=1
+                  DEPENDS test_ObsFilters.x
+                  TEST_DEPENDS ufo_get_ufo_test_data )
+
 ecbuild_add_test( TARGET  test_ufo_qc_met_office_buddy_check
                   MPI     4
                   COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsFilters.x
@@ -2052,6 +2070,14 @@ ecbuild_add_test( TARGET  test_ufo_qc_temporalthinning
                   MPI     4
                   COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsFilters.x
                   ARGS    "testinput/qc_temporal_thinning.yaml"
+                  ENVIRONMENT OOPS_TRAPFPE=1
+                  DEPENDS test_ObsFilters.x
+                  TEST_DEPENDS ufo_get_ufo_test_data )
+
+ecbuild_add_test( TARGET  test_ufo_qc_temporal_thinning_records_are_single_obs
+                  MPI     4
+                  COMMAND ${CMAKE_BINARY_DIR}/bin/test_ObsFilters.x
+                  ARGS    "testinput/qc_temporal_thinning_records_are_single_obs.yaml"
                   ENVIRONMENT OOPS_TRAPFPE=1
                   DEPENDS test_ObsFilters.x
                   TEST_DEPENDS ufo_get_ufo_test_data )
