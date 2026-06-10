@@ -630,7 +630,7 @@ void PoissonDiskThinning::thinCategoryMedian(const ObsData &obsData,
     const int minLatBins = *std::min_element(latBins.begin(), latBins.end());
     const int maxLatBins = *std::max_element(latBins.begin(), latBins.end());
     const size_t nLatBins = maxLatBins - minLatBins + 1;
-    std::vector<size_t> obsBins[nLatBins];
+    std::vector<std::vector<size_t>> obsBins(nLatBins);
     for (size_t iObsId = 0; iObsId < allObsIds.size(); iObsId++) {
       obsBins[latBins[iObsId]-minLatBins].emplace_back(iObsId);
     }
