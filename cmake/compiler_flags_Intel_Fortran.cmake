@@ -1,8 +1,8 @@
 # (C) Copyright 2009-2016 ECMWF.
-# 
+#
 # This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0. 
-# In applying this licence, ECMWF does not waive the privileges and immunities 
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+# In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation nor
 # does it submit to any jurisdiction.
 
@@ -13,10 +13,10 @@
 if( HAVE_OMP )
   set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -qopenmp")
 else( )
-  set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -qopenmp-stubs")
+  set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS}")
 endif( )
 
-set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -D_REAL8_") 
+set( CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -D_REAL8_")
 
 ####################################################################
 # RELEASE FLAGS
@@ -47,4 +47,4 @@ set( CMAKE_Fortran_LINK_FLAGS    "" )
 # Meaning of flags
 # ----------------
 # todo
-  
+
